@@ -1,0 +1,478 @@
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <title>Conversational BigQuery</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <style>
+    /* ========= THEME ========= */
+    :root {
+      --bg: #0f172a;          /* slate-900 */
+      --panel: #111827;       /* slate-800 */
+      --border: #1f2937;      /* slate-700 */
+      --text: #e2e8f0;        /* slate-200 */
+      --muted: #94a3b8;       /* slate-400 */
+      --primary: #2563eb;     /* blue-600 */
+      --primary-2: #1d4ed8;   /* blue-700 */
+      --accent: #22d3ee;      /* cyan-400 */
+      --pill: #1f2937;
+      --input: #0b1020;
+      --code: #0b1020;
+      --good: #10b981;        /* emerald-500 */
+      --warn: #f59e0b;        /* amber-500 */
+      --error-bg: #7f1d1d;    /* red-900 */
+      --error-text: #fecaca;  /* red-200 */
+      --shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --border: #e5e7eb;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #2563eb;
+      --primary-2: #1d4ed8;
+      --accent: #0ea5e9;
+      --pill: #eef2ff;
+      --input: #ffffff;
+      --code: #0b1220;
+      --error-bg: #fee2e2;
+      --error-text: #7f1d1d;
+      --shadow: 0 6px 16px rgba(0,0,0,0.12);
+    }
+
+    /* ========= LAYOUT ========= */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; padding: 24px;
+      background: radial-gradient(1200px 600px at 20% 0%, rgba(34,211,238,0.08), transparent 60%),
+                  radial-gradient(800px 400px at 100% 20%, rgba(37,99,235,0.12), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    header { margin-bottom: 16px; display:flex; align-items:center; justify-content:space-between; }
+    h1 { font-size: 22px; margin: 0; letter-spacing: 0.15px; }
+    .muted { color: var(--muted); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 960px) {
+      .grid { grid-template-columns: 420px 1fr; }
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    /* ========= CONTROLS ========= */
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    input[type="text"] {
+      flex: 1; padding: 12px 14px;
+      border-radius: 10px; border: 1px solid var(--border);
+      background: var(--input); color: var(--text);
+      outline: none;
+    }
+    input[type="text"]::placeholder { color: var(--muted); }
+    input[type="text"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.25); }
+
+    button {
+      padding: 10px 14px; border-radius: 10px; border: 0;
+      background: var(--primary); color: #fff; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px; height: 40px;
+    }
+    button:hover { background: var(--primary-2); }
+    button.secondary { background: var(--pill); color: var(--text); border: 1px solid var(--border); }
+    .icon { width: 18px; height: 18px; display:inline-block; }
+
+    .pill {
+      display: inline-flex; align-items:center; gap:8px;
+      padding: 8px 12px; border-radius: 999px; background: var(--pill);
+      margin: 6px 8px 0 0; cursor: pointer; border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .pill:hover { border-color: var(--primary); }
+
+    /* ========= TABLE ========= */
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th, td { border-bottom:1px solid var(--border); padding:10px; text-align:left; }
+    th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+    th.sortable { cursor: pointer; }
+    th.sortable:hover { color: var(--accent); }
+
+    /* ========= CODE ========= */
+    pre, code {
+      background: var(--code); color: #93c5fd; padding: 12px;
+      border-radius: 10px; overflow: auto; border:1px solid var(--border);
+    }
+
+    /* ========= STATUS ========= */
+    .error { background: var(--error-bg); color: var(--error-text); padding:10px; border-radius:10px; }
+    .status { color: var(--muted); font-size: 13px; }
+    .skeleton {
+      height: 14px; border-radius: 6px; background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.08), rgba(255,255,255,0.05));
+      animation: shimmer 1.2s infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: -200px 0; }
+      100% { background-position: 200px 0; }
+    }
+
+    /* ========= TOAST ========= */
+    .toast {
+      position: fixed; right: 24px; bottom: 24px;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 12px;
+      padding: 10px 14px; box-shadow: var(--shadow);
+      opacity: 0; transform: translateY(10px); transition: all .2s ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ========= FOOTER ========= */
+    .footer { margin-top: 8px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .sep { opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Conversational BigQuery</h1>
+      <div class="muted">Ask questions in natural language. Filters & SQL are auto‑handled.</div>
+    </div>
+    <div class="row" role="group" aria-label="Header controls">
+      <button id="themeBtn" class="secondary" title="Toggle theme" aria-label="Toggle theme">
+        <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 0 0 0 18 9 9 0 1 1 0-18z"/></svg>
+        Theme
+      </button>
+      <button id="exportBtn" class="secondary" title="Export CSV" aria-label="Export CSV">
+        <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18-5 5h3v6h4V7h3l-5-5z"/></svg>
+        Export CSV
+      </button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT: Query, quick choices, history -->
+    <section class="card" aria-label="Query panel">
+      <div class="row">
+        <label for="queryInput" class="muted" style="position:absolute; left:-9999px;">Query</label>
+        <input id="queryInput" type="text" autocomplete="off"
+               placeholder="e.g., Top 10 customers by amount in the last 30 days" />
+        <button id="runBtn" title="Run (Enter / Ctrl+Enter)">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7-11-7z"/></svg>
+          Run
+        </button>
+      </div>
+
+      <div id="quickChoices" style="margin-top:10px;"></div>
+      <div id="suggestedPrompts" style="margin-top:10px;"></div>
+
+      <div style="margin-top:12px;">
+        <div class="muted" style="margin-bottom:6px;">Recent queries</div>
+        <div id="history" class="row" style="gap:8px; flex-wrap:wrap;"></div>
+      </div>
+
+      <div class="status" id="statusCard" style="margin-top:12px;"></div>
+      <div id="errorBox" class="error" style="display:none; margin-top:10px;"></div>
+    </section>
+
+    <!-- RIGHT: Results + SQL -->
+    <section class="card" aria-label="Results panel">
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <h2 style="font-size:16px; margin:0 0 6px;">Results</h2>
+          <div id="summary" class="muted"></div>
+          <div id="clarify" class="muted" style="margin-top:6px;"></div>
+          <div id="meta" class="muted" style="margin-top:6px;"></div>
+        </div>
+        <div class="row">
+          <button id="copySqlBtn" class="secondary" title="Copy SQL" aria-label="Copy SQL">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14h14c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+            Copy SQL
+          </button>
+          <button id="toggleSqlBtn" class="secondary" title="Toggle SQL" aria-label="Toggle SQL">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3V6zm0 5h12v2H3v-2zm0 5h18v2H3v-2z"/></svg>
+            Toggle SQL
+          </button>
+        </div>
+      </div>
+
+      <div id="results" style="margin-top:8px;"></div>
+
+      <div id="sqlPane" style="margin-top:12px;">
+        <h2 style="font-size:16px; margin:0 0 6px;">SQL</h2>
+        <div class="muted">Generated vs. final (after validation & parameterization)</div>
+        <pre id="sqlGenerated" aria-label="SQL generated"></pre>
+        <pre id="sqlFinal" aria-label="SQL final"></pre>
+      </div>
+
+      <div class="footer">
+        <span class="muted">Hotkeys:</span>
+        <span>Enter</span><span class="sep">·</span><span>Ctrl+Enter</span>
+        <span class="sep">·</span><span>Esc clears input</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ========= CONFIG ========= */
+// Default API (overridable via ?api=https://... )
+let API_URL = "https://us-central1-data-engineering-479617.cloudfunctions.net/sqlbotbqupdated";
+const apiParam = new URLSearchParams(location.search).get("api");
+if (apiParam) API_URL = apiParam;
+
+/* ========= UTIL ========= */
+const $ = id => document.getElementById(id);
+const show = (el, yes) => el.style.display = yes ? "" : "none";
+const toast = (msg, type="info") => {
+  const t = $("toast"); t.textContent = msg;
+  t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 2200);
+};
+const copy = async (text) => {
+  try { await navigator.clipboard.writeText(text); toast("Copied to clipboard"); }
+  catch { toast("Copy failed", "error"); }
+};
+const saveHistory = (q) => {
+  const key = "cbq.history";
+  const list = JSON.parse(localStorage.getItem(key) || "[]");
+  const next = [q, ...list.filter(x => x !== q)].slice(0, 10);
+  localStorage.setItem(key, JSON.stringify(next));
+  renderHistory(next);
+};
+const renderHistory = (list) => {
+  const h = $("history"); h.innerHTML = "";
+  list.forEach(q => {
+    const b = document.createElement("button");
+    b.className = "pill"; b.textContent = q;
+    b.title = "Run this query"; b.onclick = () => { $("queryInput").value = q; runQuery(q); };
+    h.appendChild(b);
+  });
+};
+
+/* ========= LIST/PILLS ========= */
+function pill(text, onclick) {
+  const span = document.createElement('button');
+  span.className = 'pill';
+  span.textContent = text;
+  span.onclick = onclick;
+  return span;
+}
+function renderList(containerId, title, values, onClick) {
+  const container = $(containerId);
+  container.innerHTML = "";
+  if (values && values.length) {
+    const label = document.createElement('div');
+    label.className = 'muted';
+    label.textContent = title;
+    container.appendChild(label);
+    values.forEach(v => container.appendChild(pill(v, () => onClick(v))));
+  }
+}
+
+/* ========= TABLE ========= */
+let currentRows = [];
+let sortState = { col: null, dir: "desc" };
+let pageState = { size: 10, page: 1 };
+
+function renderTable(rows) {
+  currentRows = rows || [];
+  pageState.page = 1;
+  updateTable();
+}
+
+function sortBy(col) {
+  if (sortState.col === col) sortState.dir = (sortState.dir === "asc" ? "desc" : "asc");
+  else { sortState.col = col; sortState.dir = "asc"; }
+  updateTable();
+}
+
+function paginate(data) {
+  const start = (pageState.page - 1) * pageState.size;
+  return data.slice(start, start + pageState.size);
+}
+
+function updateTable() {
+  const results = $("results");
+  if (!currentRows.length) {
+    results.innerHTML = "<div class='muted'>No rows returned.</div>";
+    return;
+  }
+  const cols = Object.keys(currentRows[0]);
+
+  // Sort
+  const sorted = [...currentRows].sort((a,b)=>{
+    const va = a[sortState.col], vb = b[sortState.col];
+    if (va == null) return 1; if (vb == null) return -1;
+    if (typeof va === "number" && typeof vb === "number") return sortState.dir === "asc" ? va-vb : vb-va;
+    return sortState.dir === "asc" ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+
+  const pageData = sortState.col ? paginate(sorted) : paginate(currentRows);
+  let thead = "<thead><tr>" + cols.map(c => `<th class="sortable" onclick="sortBy('${c}')" title="Sort by ${c}">${c} ${sortState.col===c ? (sortState.dir==='asc'?'↑':'↓') : ''}</th>`).join("") + "</tr></thead>";
+  let tbody = "<tbody>" + pageData.map(r =>
+    "<tr>" + cols.map(c => `<td>${r[c] === null ? "" : r[c]}</td>`).join("") + "</tr>"
+  ).join("") + "</tbody>";
+
+  // Pager
+  const totalPages = Math.ceil(currentRows.length / pageState.size);
+  const pager = `
+    <div class="row" style="margin-top:8px;">
+      <div class="muted">Page ${pageState.page} / ${totalPages} (size ${pageState.size})</div>
+      <div class="row" style="gap:6px;">
+        <button class="secondary" onclick="if(pageState.page>1){pageState.page--; updateTable();}">Prev</button>
+        <button class="secondary" onclick="if(pageState.page<${totalPages}){pageState.page++; updateTable();}">Next</button>
+        <button class="secondary" onclick="pageState.size=10; pageState.page=1; updateTable();">10</button>
+        <button class="secondary" onclick="pageState.size=25; pageState.page=1; updateTable();">25</button>
+        <button class="secondary" onclick="pageState.size=50; pageState.page=1; updateTable();">50</button>
+      </div>
+    </div>`;
+
+  results.innerHTML = `<table>${thead}${tbody}</table>${pager}`;
+}
+
+/* ========= RENDER HELPERS ========= */
+function setMeta(meta) {
+  if (!meta) { $("meta").textContent = ""; return; }
+  const tableUsed = meta.table_used ? ` | Table: ${meta.table_used}` : "";
+  $("meta").textContent = `Rows: ${meta.rows_returned ?? 0} | Dataset: ${meta.dataset ?? ""} | Mode: ${meta.mode ?? ""}${tableUsed}`;
+}
+
+function setStatus(msg) {
+  $("statusCard").textContent = msg;
+}
+
+function setLoading(on=true) {
+  show($("errorBox"), false);
+  setStatus(on ? "Running…" : "");
+  if (on) {
+    $("results").innerHTML = `
+      <div class="row" style="gap:10px;">
+        <div class="skeleton" style="width:30%;"></div>
+        <div class="skeleton" style="width:20%;"></div>
+        <div class="skeleton" style="width:40%;"></div>
+      </div>
+      <div class="row" style="gap:10px; margin-top:8px;">
+        <div class="skeleton" style="width:50%;"></div>
+        <div class="skeleton" style="width:25%;"></div>
+        <div class="skeleton" style="width:35%;"></div>
+      </div>`;
+  }
+}
+
+/* ========= CORE ========= */
+async function runQuery(queryText) {
+  setLoading(true);
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: queryText })
+    });
+    const data = await res.json();
+    const now = new Date().toLocaleTimeString();
+
+    if (!res.ok) {
+      show($("errorBox"), true);
+      $("errorBox").textContent = data.error || "Unexpected error";
+      toast("Query failed", "error");
+    } else {
+      saveHistory(queryText);
+      renderList("quickChoices", "Quick choices:", data.quick_choices || [], (v) => { $("queryInput").value = v; runQuery(v); });
+      renderList("suggestedPrompts", "Suggested prompts:", data.suggested_prompts || [], (v) => { $("queryInput").value = v; runQuery(v); });
+
+      $("summary").textContent = data.summary || "";
+      $("clarify").textContent = (data.clarify && data.clarify.length)
+        ? "Clarify: " + data.clarify.join(" | ") : "";
+      setMeta(data.meta);
+
+      $("sqlGenerated").textContent = (data.sql_generated || "");
+      $("sqlFinal").textContent = (data.sql_final || "");
+
+      renderTable(data.results || []);
+      toast("Done " + now, "info");
+    }
+    setStatus(`Done ${now} (model: ${data.model ?? ""}, location: ${data.location ?? ""})`);
+  } catch (e) {
+    show($("errorBox"), true);
+    $("errorBox").textContent = e.message;
+    setStatus("Failed.");
+    toast("Network error", "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+/* ========= EVENTS ========= */
+$("runBtn").onclick = () => {
+  const q = $("queryInput").value.trim();
+  if (q) runQuery(q);
+};
+
+$("queryInput").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.ctrlKey) { ev.preventDefault(); $("runBtn").click(); }
+  if (ev.key === "Enter" && ev.ctrlKey) { ev.preventDefault(); $("runBtn").click(); }
+  if (ev.key === "Escape") { $("queryInput").value = ""; }
+});
+
+$("copySqlBtn").onclick = () => copy(`${$("sqlFinal").textContent || $("sqlGenerated").textContent || ""}`);
+
+$("toggleSqlBtn").onclick = () => {
+  const pane = $("sqlPane");
+  pane.style.display = (pane.style.display === "none" ? "" : "none");
+};
+
+$("exportBtn").onclick = () => {
+  const rows = currentRows || [];
+  if (!rows.length) { toast("No rows to export"); return; }
+  const cols = Object.keys(rows[0]);
+  const csv = [cols.join(",")].concat(rows.map(r => cols.map(c => JSON.stringify(r[c] ?? "")).join(","))).join("\n");
+  const blob = new Blob([csv], {type: "text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `results_${Date.now()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast("CSV exported");
+};
+
+$("themeBtn").onclick = () => {
+  const root = document.documentElement;
+  const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  root.setAttribute("data-theme", next);
+  toast(`Theme: ${next}`);
+};
+
+/* ========= INIT ========= */
+(function init() {
+  // Seed some helpful quick choices
+  renderList("quickChoices", "Quick choices:", [
+    "Exactly 200", "≥ 200", "Between 100–300", "Top 10 customers last 30 days"
+  ], (v) => { $("queryInput").value = v; runQuery(v); });
+
+  renderList("suggestedPrompts", "Suggested prompts:", [
+    "Customers who spent ≥ 200 this quarter",
+    "Average amount for customers > 1000 this year",
+    "Alice’s purchases after 2025-01-01"
+  ], (v) => { $("queryInput").value = v; runQuery(v); });
+
+  // Load history
+  try { renderHistory(JSON.parse(localStorage.getItem("cbq.history") || "[]")); } catch {}
+
+  // Focus input
+  $("queryInput").focus();
+})();
+</script>
+</body>
+</html>
