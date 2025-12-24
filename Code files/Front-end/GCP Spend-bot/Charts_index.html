@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spend Analytics AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 95%;
+      max-width: 1100px;
+      background: #fff;
+      border-radius: 18px;
+      padding: 30px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 25px;
+    }
+
+    .header h1 {
+      font-size: 26px;
+      margin: 0;
+      color: #1a237e;
+    }
+
+    .badge {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .search-box {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    input {
+      flex: 1;
+      padding: 14px;
+      font-size: 15px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      outline: none;
+    }
+
+    button {
+      background: linear-gradient(135deg, #3949ab, #1e88e5);
+      border: none;
+      padding: 14px 22px;
+      color: #fff;
+      font-size: 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .card {
+      background: #f9fafc;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 15px;
+      border: 1px solid #e0e0e0;
+    }
+
+    pre {
+      background: #111827;
+      color: #00e676;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+      font-size: 14px;
+      text-align: left;
+    }
+
+    th { background: #e3f2fd; }
+
+    .confidence {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .warning {
+      background: #fff3e0;
+      border-left: 5px solid #fb8c00;
+      padding: 10px 15px;
+      border-radius: 8px;
+      color: #e65100;
+      margin-bottom: 15px;
+    }
+
+    .chart-wrapper {
+      width: 420px;
+      max-width: 100%;
+      margin: 0 auto;
+    }
+
+    canvas { max-height: 350px; }
+
+    .chart-controls {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>Spend Analytics AI</h1>
+    <div class="badge">Cloud Run • BigQuery • AI</div>
+  </div>
+
+  <div class="search-box">
+    <input id="question" placeholder="Ask: Total spend by business unit" />
+    <button onclick="ask()">Ask AI</button>
+  </div>
+
+  <div id="confidence"></div>
+  <div id="warnings"></div>
+
+  <div class="card">
+    <h3>Generated SQL</h3>
+    <pre id="sql">-- SQL will appear here</pre>
+  </div>
+
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet</div>
+  </div>
+
+  <div class="card" id="chartCard" style="display:none;">
+    <h3>Visualization</h3>
+
+    <div class="chart-controls">
+      <button onclick="setChartType('bar')">Bar</button>
+      <button onclick="setChartType('pie')">Pie</button>
+      <button onclick="setChartType('doughnut')">Donut</button>
+      <button onclick="exportChart()">Export PNG</button>
+    </div>
+
+    <div class="chart-wrapper">
+      <canvas id="chartCanvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
+
+  let chartInstance = null;
+  let currentChartType = "bar";
+  let lastChartData = null;
+
+  async function ask() {
+    const q = document.getElementById("question").value;
+    if (!q) return alert("Enter a question");
+
+    document.getElementById("sql").innerText = "Running query...";
+    document.getElementById("results").innerHTML = "Loading...";
+    document.getElementById("confidence").innerHTML = "";
+    document.getElementById("warnings").innerHTML = "";
+    document.getElementById("chartCard").style.display = "none";
+
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q })
+    });
+
+    const data = await res.json();
+
+    document.getElementById("sql").innerText = data.sql;
+    document.getElementById("confidence").innerHTML =
+      `<span class="confidence">Confidence: ${data.confidence_score}</span>`;
+
+    if (data.warnings && data.warnings.length) {
+      document.getElementById("warnings").innerHTML =
+        `<div class="warning">${data.warnings.join("<br>")}</div>`;
+    }
+
+    renderTable(data.rows);
+    renderChart(data.rows);
+  }
+
+  function renderTable(rows) {
+    if (!rows || rows.length === 0) {
+      document.getElementById("results").innerHTML = "No data";
+      return;
+    }
+
+    const cols = Object.keys(rows[0]);
+    let html = "<table><tr>";
+    cols.forEach(c => html += `<th>${c}</th>`);
+    html += "</tr>";
+
+    rows.forEach(r => {
+      html += "<tr>";
+      cols.forEach(c => html += `<td>${r[c]}</td>`);
+      html += "</tr>";
+    });
+
+    html += "</table>";
+    document.getElementById("results").innerHTML = html;
+  }
+
+  function renderChart(rows) {
+    if (!rows || rows.length === 0) return;
+
+    const keys = Object.keys(rows[0]);
+    if (keys.length < 2) return;
+
+    document.getElementById("chartCard").style.display = "block";
+
+    const labelKey = keys[0];
+    const valueKey = keys[1];
+
+    lastChartData = {
+      labels: rows.map(r => r[labelKey]),
+      values: rows.map(r => Number(r[valueKey])),
+      labelKey,
+      valueKey
+    };
+
+    drawChart();
+  }
+
+  function drawChart() {
+    if (!lastChartData) return;
+
+    const ctx = document.getElementById("chartCanvas");
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+      type: currentChartType,
+      data: {
+        labels: lastChartData.labels,
+        datasets: [{
+          label: lastChartData.valueKey.toUpperCase(),
+          data: lastChartData.values,
+          backgroundColor: [
+            "#1e88e5", "#43a047", "#fb8c00",
+            "#8e24aa", "#e53935", "#00acc1"
+          ]
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        aspectRatio: 1.2,
+        onClick: (evt, elements) => {
+          if (elements.length > 0) {
+            const idx = elements[0].index;
+            const label = lastChartData.labels[idx];
+            alert(`Drill-down clicked: ${label}`);
+            // Backend drill-down API can be called here
+          }
+        },
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: {
+            callbacks: {
+              label: ctx => `₹ ${ctx.raw.toLocaleString()}`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function setChartType(type) {
+    currentChartType = type;
+    drawChart();
+  }
+
+  function exportChart() {
+    if (!chartInstance) return;
+    const link = document.createElement("a");
+    link.href = chartInstance.toBase64Image();
+    link.download = "spend_chart.png";
+    link.click();
+  }
+</script>
+
+</body>
+</html>
