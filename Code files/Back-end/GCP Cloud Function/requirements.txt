@@ -1,0 +1,7 @@
+
+functions-framework>=3.5.0
+Flask>=2.3.3
+google-auth>=2.23.0
+requests>=2.31.0
+google-cloud-bigquery>=3.14.0
+google-cloud-aiplatform>=1.66.0

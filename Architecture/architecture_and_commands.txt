@@ -1,0 +1,182 @@
+ARCHITECTURE & COMMANDS – Spend Analytics SQL Bot
+
+Project: AI-powered Spend Analytics (Cloud Run + Cloud Functions + BigQuery + UI)
+Date: Today
+
+============================================================
+1. HIGH-LEVEL ARCHITECTURE
+============================================================
+
++-------------------+
+|  Browser UI       |
+|  (HTML + JS)      |
++-------------------+
+          |
+          | HTTPS POST (JSON: question)
+          v
++----------------------------+
+|  Cloud Run / Cloud Function|
+|  Flask API (main.py)       |
++----------------------------+
+          |
+          | Generated SQL
+          v
++-------------------+
+|  BigQuery         |
+|  Spend Dataset    |
++-------------------+
+          |
+          v
++-------------------+
+|  Query Results    |
+|  JSON Response    |
++-------------------+
+
+============================================================
+2. DATA FLOW
+============================================================
+
+User Prompt
+   ↓
+Browser UI (index.html)
+   ↓
+Cloud Shell / Hosted UI
+   ↓
+Cloud Run / Cloud Function entry_point()
+   ↓
+ask_agent()
+   ↓
+generate_sql()
+   ↓
+validate_sql_ast()
+   ↓
+BigQuery query execution
+   ↓
+Results + metadata
+   ↓
+JSON response to UI
+
+============================================================
+3. GCLOUD & OTHER COMMANDS USED
+============================================================
+
+------------------------------------------------------------
+A. Authenticate Cloud Shell
+------------------------------------------------------------
+gcloud auth login
+
+------------------------------------------------------------
+B. Set Project
+------------------------------------------------------------
+gcloud config set project data-engineering-479617
+
+------------------------------------------------------------
+C. Load CSV into BigQuery
+------------------------------------------------------------
+gsutil ls gs://datavip/spend_cube_clean.csv
+
+bq load \
+  --source_format=CSV \
+  --autodetect \
+  --skip_leading_rows=1 \
+  data-engineering-479617:conversational_demo.sample_spenddata \
+  gs://datavip/spend_cube_clean.csv
+
+------------------------------------------------------------
+D. Deploy using Cloud Run
+------------------------------------------------------------
+gcloud run deploy sqlbotmainup \
+  --region us-central1 \
+  --source . \
+  --platform managed
+
+------------------------------------------------------------
+E. Allow Public Access to Cloud Run (UI Access)
+------------------------------------------------------------
+gcloud run services add-iam-policy-binding sqlbotmainup \
+  --region us-central1 \
+  --member="allUsers" \
+  --role="roles/run.invoker"
+
+------------------------------------------------------------
+F. Deploy using Cloud Functions (Gen2)
+------------------------------------------------------------
+gcloud functions deploy sqlbotmainup \
+  --gen2 \
+  --runtime python311 \
+  --region us-central1 \
+  --source . \
+  --entry-point entry_point \
+  --trigger-http \
+  --allow-unauthenticated
+
+------------------------------------------------------------
+G. Run UI in Google Cloud Shell (LOCAL PREVIEW)
+------------------------------------------------------------
+
+1. Create UI file
+nano index.html
+
+2. Paste HTML + JS UI code
+Save and exit (CTRL+O, ENTER, CTRL+X)
+
+3. Run local web server
+python3 -m http.server 8080
+
+4. Open UI
+Cloud Shell → Web Preview → Preview on port 8080
+
+------------------------------------------------------------
+H. Test API using curl
+------------------------------------------------------------
+curl -X POST "https://SERVICE_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Total spend"}'
+
+(Optional – Authenticated curl)
+curl -X POST "https://SERVICE_URL" \
+  -H "Authorization: bearer $(gcloud auth print-identity-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Total spend"}'
+
+------------------------------------------------------------
+I. Optional: Deploy UI to GCS
+------------------------------------------------------------
+gsutil mb gs://spend-ui-demo
+gsutil cp index.html gs://spend-ui-demo
+gsutil web set -m index.html gs://spend-ui-demo
+gsutil iam ch allUsers:objectViewer gs://spend-ui-demo
+
+------------------------------------------------------------
+J. BigQuery Data Quality Checks
+------------------------------------------------------------
+SELECT COUNT(*) FROM conversational_demo.sample_spenddata;
+
+SELECT
+  COUNTIF(SAFE_CAST(PO_DT AS DATE) IS NOT NULL)
+FROM conversational_demo.sample_spenddata;
+
+============================================================
+4. KEY DESIGN DECISIONS
+============================================================
+
+- Fail-open analytics for dirty date data
+- COALESCE used to avoid NULL aggregates
+- SQL AST validation for security
+- Public backend for UI demo
+- Same codebase works for Cloud Run & Cloud Functions Gen2
+
+============================================================
+5. INTERVIEW-READY SUMMARY
+============================================================
+
+“I built an AI-driven spend analytics system where users ask
+natural language questions through a web UI. The backend runs
+on Cloud Run or Cloud Functions Gen2, dynamically generates
+safe SQL, validates it, and executes it on BigQuery. The system
+is resilient to dirty data, browser-safe with CORS, and built
+using cloud-native best practices.”
+
+============================================================
+END OF FILE
+============================================================

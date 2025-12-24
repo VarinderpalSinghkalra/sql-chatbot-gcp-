@@ -1,0 +1,5 @@
+User → HTTPS Request → Cloud Function (Gen2)
+        → Vertex AI (Gemini API)
+        → Generate SQL
+        → BigQuery (Read-Only)
+        → Return Results as JSON

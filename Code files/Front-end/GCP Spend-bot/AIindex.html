@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spend Analytics AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Google Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Inter', sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #fff;
+    }
+
+    .container {
+      width: 95%;
+      max-width: 1100px;
+      background: #ffffff;
+      color: #111;
+      border-radius: 18px;
+      padding: 30px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 25px;
+    }
+
+    .header h1 {
+      font-size: 26px;
+      margin: 0;
+      color: #1a237e;
+    }
+
+    .badge {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .search-box {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    input {
+      flex: 1;
+      padding: 14px;
+      font-size: 15px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      outline: none;
+    }
+
+    button {
+      background: linear-gradient(135deg, #3949ab, #1e88e5);
+      border: none;
+      padding: 14px 22px;
+      color: #fff;
+      font-size: 15px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: 0.3s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+    }
+
+    .card {
+      background: #f9fafc;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 15px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .card h3 {
+      margin-top: 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    pre {
+      background: #111827;
+      color: #00e676;
+      padding: 14px;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    th {
+      background: #e3f2fd;
+      font-weight: 600;
+    }
+
+    .warning {
+      background: #fff3e0;
+      border-left: 5px solid #fb8c00;
+      padding: 10px 15px;
+      border-radius: 8px;
+      color: #e65100;
+      font-size: 14px;
+    }
+
+    .confidence {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 13px;
+      color: #777;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>Spend Analytics AI</h1>
+    <div class="badge">Cloud Run • BigQuery • AI</div>
+  </div>
+
+  <div class="search-box">
+    <input id="question" placeholder="Ask something like: Total spend by business unit last 12 months" />
+    <button onclick="ask()">Ask AI</button>
+  </div>
+
+  <div id="confidence" style="margin-bottom:15px;"></div>
+
+  <div id="warnings"></div>
+
+  <div class="card">
+    <h3>Generated SQL</h3>
+    <pre id="sql">-- SQL will appear here</pre>
+  </div>
+
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet</div>
+  </div>
+
+  <div class="footer">
+    © 2025 • AI Powered Spend Intelligence
+  </div>
+</div>
+
+<script>
+  const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
+
+  async function ask() {
+    const q = document.getElementById("question").value;
+    if (!q) return alert("Please enter a question");
+
+    document.getElementById("sql").innerText = "Running query...";
+    document.getElementById("results").innerHTML = "Loading...";
+    document.getElementById("warnings").innerHTML = "";
+    document.getElementById("confidence").innerHTML = "";
+
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ question: q })
+      });
+
+      const data = await res.json();
+
+      document.getElementById("sql").innerText = data.sql || "N/A";
+
+      // Confidence
+      document.getElementById("confidence").innerHTML =
+        `<span class="confidence">Confidence: ${data.confidence_score}</span>`;
+
+      // Warnings
+      if (data.warnings && data.warnings.length > 0) {
+        document.getElementById("warnings").innerHTML =
+          `<div class="warning">${data.warnings.join("<br>")}</div>`;
+      }
+
+      // Results table
+      renderTable(data.rows);
+
+    } catch (err) {
+      document.getElementById("results").innerHTML = "Error occurred";
+    }
+  }
+
+  function renderTable(rows) {
+    if (!rows || rows.length === 0) {
+      document.getElementById("results").innerHTML = "No data found";
+      return;
+    }
+
+    const cols = Object.keys(rows[0]);
+    let html = "<table><tr>";
+
+    cols.forEach(c => html += `<th>${c}</th>`);
+    html += "</tr>";
+
+    rows.forEach(r => {
+      html += "<tr>";
+      cols.forEach(c => html += `<td>${r[c]}</td>`);
+      html += "</tr>";
+    });
+
+    html += "</table>";
+    document.getElementById("results").innerHTML = html;
+  }
+</script>
+
+</body>
+</html>
