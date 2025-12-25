@@ -1,6 +1,7 @@
 # main.py
 import os
 import logging
+import threading
 from typing import Dict, Any, List, Optional
 
 import sqlglot
@@ -17,15 +18,23 @@ DATASET = os.environ.get("BQ_DATASET", "conversational_demo")
 TABLE = os.environ.get("BQ_TABLE", "sample_spenddata")
 
 FULL_TABLE_ID = f"{PROJECT_ID}.{DATASET}.{TABLE}"
+GEMINI_MODEL = os.environ.get("GENAI_MODEL", "gemini-2.5-pro")
 
+# ------------------------------
+# GLOBAL CLIENTS & CACHES
+# ------------------------------
 bq_client = None
+gemini_model = None
 
-# ------------------------------
-# SCHEMA CACHE
-# ------------------------------
+# Schema cache (once per container)
 TABLE_SCHEMA: Dict[str, str] = {}
 
-# Allowed dimensions (safe list)
+# Aggressive in-memory query cache
+QUERY_RESULT_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+
+# ------------------------------
+# DIMENSION REGISTRY (SAFE LIST)
+# ------------------------------
 DIMENSION_KEYWORDS = {
     "business unit": "business_unit",
     "business segment": "business_segment",
@@ -33,31 +42,59 @@ DIMENSION_KEYWORDS = {
     "buyer": "buyer",
     "supplier": "supplier",
     "vendor": "supplier",
-    "buying channel": "buying_channel"
+    "buying channel": "buying_channel",
 }
 
 # ------------------------------
-# CLIENT & SCHEMA
+# CLIENTS
 # ------------------------------
 def ensure_clients():
     global bq_client
-    if bq_client:
-        return
-    from google.cloud import bigquery
-    bq_client = bigquery.Client(project=PROJECT_ID)
+    if bq_client is None:
+        from google.cloud import bigquery
+        bq_client = bigquery.Client(project=PROJECT_ID)
 
 
-def load_schema():
-    ensure_clients()
+def get_gemini():
+    """
+    Gemini client is created lazily and used ONLY in async background tasks.
+    Never blocks the request path.
+    """
+    global gemini_model
+    if gemini_model:
+        return gemini_model
+
+    try:
+        import vertexai
+        from vertexai.generative_models import GenerativeModel
+
+        vertexai.init(project=PROJECT_ID, location="us-central1")
+        gemini_model = GenerativeModel(GEMINI_MODEL)
+        return gemini_model
+
+    except Exception as e:
+        logger.warning("Gemini unavailable: %s", e)
+        return None
+
+
+# ------------------------------
+# SCHEMA (LOAD ONCE)
+# ------------------------------
+def load_schema_once():
     if TABLE_SCHEMA:
         return
 
+    ensure_clients()
     table = bq_client.get_table(FULL_TABLE_ID)
+
     for field in table.schema:
         TABLE_SCHEMA[field.name.lower()] = field.field_type.upper()
 
-    logger.info("Loaded schema with %d columns", len(TABLE_SCHEMA))
+    logger.info("Schema cached with %d columns", len(TABLE_SCHEMA))
 
+
+# Load schema at container startup (warm instance = fast)
+load_schema_once()
 
 # ------------------------------
 # SAFE METRICS
@@ -89,14 +126,14 @@ def resolve_metric(question: str) -> str:
 # ------------------------------
 def resolve_dimension(question: str) -> Optional[str]:
     q = question.lower()
-    for key, column in DIMENSION_KEYWORDS.items():
-        if key in q and column in TABLE_SCHEMA:
+    for keyword, column in DIMENSION_KEYWORDS.items():
+        if keyword in q and column in TABLE_SCHEMA:
             return column
     return None
 
 
 # ------------------------------
-# DATE FILTER (FAIL-OPEN)
+# DATE FILTER (FAST + FAIL-OPEN)
 # ------------------------------
 def build_time_filter(question: str) -> str:
     q = question.lower()
@@ -165,7 +202,7 @@ def validate_sql_ast(sql: str):
 
     for table in tree.find_all(exp.Table):
         if table.name.lower() != TABLE.lower():
-            raise ValueError(f"Unknown table used: {table.name}")
+            raise ValueError(f"Unauthorized table used: {table.name}")
 
     for col in tree.find_all(exp.Column):
         if col.name.lower() not in TABLE_SCHEMA:
@@ -173,11 +210,18 @@ def validate_sql_ast(sql: str):
 
 
 # ------------------------------
-# EXECUTION
+# QUERY EXECUTION (CACHED)
 # ------------------------------
-def run_query(sql: str) -> List[Dict[str, Any]]:
+def run_query_cached(sql: str) -> List[Dict[str, Any]]:
+    if sql in QUERY_RESULT_CACHE:
+        logger.info("Cache hit")
+        return QUERY_RESULT_CACHE[sql]
+
+    logger.info("Cache miss → executing BigQuery")
     job = bq_client.query(sql)
-    return [dict(row) for row in job.result()]
+    rows = [dict(row) for row in job.result()]
+    QUERY_RESULT_CACHE[sql] = rows
+    return rows
 
 
 # ------------------------------
@@ -193,15 +237,57 @@ def confidence_score(sql: str) -> float:
 
 
 # ------------------------------
-# MAIN AGENT
+# ASYNC GEMINI (NON-BLOCKING)
+# ------------------------------
+def run_gemini_async(question: str, sql: str):
+    """
+    Runs AFTER response is sent.
+    Used only for explanations & suggestions.
+    """
+    try:
+        model = get_gemini()
+        if not model:
+            return
+
+        prompt = f"""
+You are an analytics assistant.
+
+User question:
+{question}
+
+Task:
+1. Explain the result in simple business language.
+2. Suggest 2 follow-up analytical questions.
+
+Rules:
+- Do NOT generate SQL
+- Do NOT mention tables or columns
+- Keep it short
+"""
+
+        response = model.generate_content(prompt)
+        insight = response.text.strip()
+
+        logger.info("Gemini async insight: %s", insight)
+
+    except Exception:
+        logger.exception("Gemini async task failed")
+
+
+# ------------------------------
+# MAIN AGENT (FAST PATH)
 # ------------------------------
 def ask_agent(question: str) -> Dict[str, Any]:
-    ensure_clients()
-    load_schema()
-
     sql = generate_sql(question)
     validate_sql_ast(sql)
-    rows = run_query(sql)
+    rows = run_query_cached(sql)
+
+    # 🔥 Async Gemini (never blocks)
+    threading.Thread(
+        target=run_gemini_async,
+        args=(question, sql),
+        daemon=True
+    ).start()
 
     warnings = []
     if resolve_dimension(question) is None and "by" in question.lower():
@@ -213,16 +299,17 @@ def ask_agent(question: str) -> Dict[str, Any]:
         "rows": rows,
         "confidence_score": confidence_score(sql),
         "warnings": warnings,
+        "cache_size": len(QUERY_RESULT_CACHE),
     }
 
 
 # ------------------------------
-# HTTP ENTRY POINT (CORS + UI)
+# HTTP ENTRY POINT
 # ------------------------------
 def entry_point(request):
     from flask import jsonify, make_response
 
-    # Handle CORS preflight
+    # CORS preflight
     if request.method == "OPTIONS":
         resp = make_response("", 204)
         resp.headers["Access-Control-Allow-Origin"] = "*"

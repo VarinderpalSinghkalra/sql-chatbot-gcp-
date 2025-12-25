@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spend Analytics AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 95%;
+      max-width: 1150px;
+      background: #fff;
+      border-radius: 18px;
+      padding: 30px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+    }
+
+    h1 { color: #1a237e; margin: 0; }
+
+    .badge {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .search-box { display: flex; gap: 10px; margin: 20px 0; }
+
+    input {
+      flex: 1;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+    }
+
+    button {
+      background: linear-gradient(135deg, #3949ab, #1e88e5);
+      border: none;
+      padding: 14px 22px;
+      color: #fff;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .card {
+      background: #f9fafc;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 15px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .kpi {
+      font-size: 36px;
+      font-weight: 700;
+      color: #1e88e5;
+    }
+
+    .confidence {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .warning {
+      background: #fff3e0;
+      border-left: 5px solid #fb8c00;
+      padding: 10px 15px;
+      border-radius: 8px;
+      color: #e65100;
+    }
+
+    pre {
+      background: #111827;
+      color: #00e676;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; border-bottom: 1px solid #ddd; }
+    th { background: #e3f2fd; }
+
+    .chart-wrapper { max-width: 420px; margin: auto; }
+
+    .ai-panel {
+      background: #f3e5f5;
+      border-left: 5px solid #8e24aa;
+      padding: 15px;
+      border-radius: 10px;
+      color: #4a148c;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h1>Spend Analytics AI</h1>
+    <div class="badge">Enterprise Analytics</div>
+  </div>
+
+  <div class="search-box">
+    <input id="question" placeholder="Ask: Buying channel wise spend" />
+    <button onclick="ask()">Ask</button>
+  </div>
+
+  <div id="confidence"></div>
+  <div id="warnings"></div>
+
+  <div class="card">
+    <h3>Generated SQL</h3>
+    <pre id="sql">--</pre>
+  </div>
+
+  <div class="card" id="resultCard"></div>
+  <div class="card" id="chartCard" style="display:none;">
+    <canvas id="chartCanvas"></canvas>
+  </div>
+
+  <div class="card" id="aiPanel" style="display:none;"></div>
+</div>
+
+<script>
+/* =========================
+   FEATURE FLAGS
+========================= */
+const ENABLE_AI_PANEL = true;
+
+/* =========================
+   APP STATE (React-like)
+========================= */
+const State = {
+  rows: [],
+  sql: "",
+  confidence: null,
+  warnings: []
+};
+
+const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
+let chartInstance = null;
+
+/* =========================
+   MAIN ACTION
+========================= */
+async function ask() {
+  const q = question.value;
+  if (!q) return;
+
+  resultCard.innerHTML = "Loading...";
+  chartCard.style.display = "none";
+  aiPanel.style.display = "none";
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: q })
+  });
+
+  const data = await res.json();
+  State.rows = data.rows || [];
+  State.sql = data.sql;
+  State.confidence = data.confidence_score;
+  State.warnings = data.warnings || [];
+
+  render();
+}
+
+/* =========================
+   RENDER FUNCTIONS
+========================= */
+function render() {
+  sql.innerText = State.sql;
+  renderConfidence();
+  renderWarnings();
+  renderResult();
+  renderChart();
+  renderAIPanel();
+}
+
+function renderConfidence() {
+  confidence.innerHTML = State.confidence
+    ? `<span class="confidence">Confidence ${(State.confidence*100).toFixed(0)}%</span>`
+    : "";
+}
+
+function renderWarnings() {
+  warnings.innerHTML = State.warnings.length
+    ? `<div class="warning">${State.warnings.join("<br>")}</div>`
+    : "";
+}
+
+/* Looker-style logic */
+function renderResult() {
+  if (!State.rows.length) {
+    resultCard.innerHTML = "No data";
+    return;
+  }
+
+  const keys = Object.keys(State.rows[0]);
+
+  // KPI
+  if (keys.length === 1) {
+    resultCard.innerHTML = `
+      <div class="kpi">₹ ${Number(State.rows[0][keys[0]]).toLocaleString()}</div>
+      <div>Total ${keys[0]}</div>
+    `;
+    return;
+  }
+
+  // Table
+  let html = "<table><tr>";
+  keys.forEach(k => html += `<th>${k}</th>`);
+  html += "</tr>";
+
+  State.rows.forEach(r => {
+    html += "<tr>";
+    keys.forEach(k => html += `<td>${r[k]}</td>`);
+    html += "</tr>";
+  });
+
+  html += "</table>";
+  resultCard.innerHTML = html;
+}
+
+function renderChart() {
+  if (State.rows.length === 0) return;
+
+  const keys = Object.keys(State.rows[0]);
+  if (keys.length < 2) return;
+
+  chartCard.style.display = "block";
+  if (chartInstance) chartInstance.destroy();
+
+  chartInstance = new Chart(chartCanvas, {
+    type: "bar",
+    data: {
+      labels: State.rows.map(r => r[keys[0]]),
+      datasets: [{
+        label: keys[1],
+        data: State.rows.map(r => r[keys[1]]),
+        backgroundColor: "#1e88e5"
+      }]
+    },
+    options: { plugins:{ legend:{ display:false } } }
+  });
+}
+
+function renderAIPanel() {
+  if (!ENABLE_AI_PANEL) return;
+
+  aiPanel.style.display = "block";
+  aiPanel.className = "ai-panel";
+  aiPanel.innerHTML = `
+    <b>AI Insights</b><br>
+    Generating explanation & suggestions…<br>
+    <small>(Available shortly)</small>
+  `;
+}
+</script>
+
+</body>
+</html>
