@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Spend Analytics AI</title>
+  <title>Spend Analytics</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -47,12 +47,13 @@
       padding: 14px;
       border-radius: 10px;
       border: 1px solid #ddd;
+      font-size: 15px;
     }
 
     button {
       background: linear-gradient(135deg, #3949ab, #1e88e5);
       border: none;
-      padding: 14px 22px;
+      padding: 10px 18px;
       color: #fff;
       border-radius: 10px;
       cursor: pointer;
@@ -67,12 +68,6 @@
       border: 1px solid #e0e0e0;
     }
 
-    .kpi {
-      font-size: 36px;
-      font-weight: 700;
-      color: #1e88e5;
-    }
-
     .confidence {
       display: inline-block;
       background: #e8f5e9;
@@ -81,15 +76,16 @@
       border-radius: 20px;
       font-size: 13px;
       font-weight: 600;
-      margin-bottom: 10px;
     }
 
-    .warning {
-      background: #fff3e0;
-      border-left: 5px solid #fb8c00;
-      padding: 10px 15px;
+    .insight {
+      background: #e3f2fd;
+      border-left: 5px solid #1e88e5;
+      padding: 12px 15px;
       border-radius: 8px;
-      color: #e65100;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #0d47a1;
     }
 
     pre {
@@ -105,14 +101,17 @@
     th, td { padding: 12px; border-bottom: 1px solid #ddd; }
     th { background: #e3f2fd; }
 
-    .chart-wrapper { max-width: 420px; margin: auto; }
+    .chart-controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
 
-    .ai-panel {
-      background: #f3e5f5;
-      border-left: 5px solid #8e24aa;
-      padding: 15px;
-      border-radius: 10px;
-      color: #4a148c;
+    .chart-wrapper {
+      max-width: 420px;
+      margin: auto;
     }
   </style>
 </head>
@@ -120,61 +119,71 @@
 <body>
 
 <div class="container">
+
+  <!-- Header -->
   <div style="display:flex;justify-content:space-between;align-items:center;">
-    <h1>Spend Analytics AI</h1>
-    <div class="badge">Enterprise Analytics</div>
+    <h1>Spend Analytics</h1>
+    <div class="badge">BigQuery Native</div>
   </div>
 
+  <!-- Query -->
   <div class="search-box">
     <input id="question" placeholder="Ask: Buying channel wise spend" />
     <button onclick="ask()">Ask</button>
   </div>
 
   <div id="confidence"></div>
-  <div id="warnings"></div>
 
+  <!-- Looker-style Insights -->
+  <div class="card">
+    <h3>Insights</h3>
+    <div id="insights">Run a query to see insights</div>
+  </div>
+
+  <!-- SQL -->
   <div class="card">
     <h3>Generated SQL</h3>
     <pre id="sql">--</pre>
   </div>
 
-  <div class="card" id="resultCard"></div>
-  <div class="card" id="chartCard" style="display:none;">
-    <canvas id="chartCanvas"></canvas>
+  <!-- Results -->
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet</div>
   </div>
 
-  <div class="card" id="aiPanel" style="display:none;"></div>
+  <!-- Charts -->
+  <div class="card" id="chartCard" style="display:none;">
+    <h3>Visualization</h3>
+
+    <div class="chart-controls">
+      <button onclick="setChartType('bar')">Bar</button>
+      <button onclick="setChartType('pie')">Pie</button>
+      <button onclick="setChartType('doughnut')">Donut</button>
+      <button onclick="exportChart()">Export PNG</button>
+    </div>
+
+    <div class="chart-wrapper">
+      <canvas id="chartCanvas"></canvas>
+    </div>
+  </div>
+
 </div>
 
 <script>
-/* =========================
-   FEATURE FLAGS
-========================= */
-const ENABLE_AI_PANEL = true;
-
-/* =========================
-   APP STATE (React-like)
-========================= */
-const State = {
-  rows: [],
-  sql: "",
-  confidence: null,
-  warnings: []
-};
-
 const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
-let chartInstance = null;
 
-/* =========================
-   MAIN ACTION
-========================= */
+let chartInstance = null;
+let currentChartType = "bar";
+let lastChartData = null;
+
 async function ask() {
   const q = question.value;
   if (!q) return;
 
-  resultCard.innerHTML = "Loading...";
+  results.innerHTML = "Loading...";
+  insights.innerHTML = "Analyzing...";
   chartCard.style.display = "none";
-  aiPanel.style.display = "none";
 
   const res = await fetch(API_URL, {
     method: "POST",
@@ -183,104 +192,112 @@ async function ask() {
   });
 
   const data = await res.json();
-  State.rows = data.rows || [];
-  State.sql = data.sql;
-  State.confidence = data.confidence_score;
-  State.warnings = data.warnings || [];
 
-  render();
+  sql.innerText = data.sql;
+  confidence.innerHTML =
+    `<span class="confidence">Confidence ${(data.confidence_score * 100).toFixed(0)}%</span>`;
+
+  renderTable(data.rows);
+  renderInsights(data.rows);
+  renderChart(data.rows);
 }
 
-/* =========================
-   RENDER FUNCTIONS
-========================= */
-function render() {
-  sql.innerText = State.sql;
-  renderConfidence();
-  renderWarnings();
-  renderResult();
-  renderChart();
-  renderAIPanel();
-}
-
-function renderConfidence() {
-  confidence.innerHTML = State.confidence
-    ? `<span class="confidence">Confidence ${(State.confidence*100).toFixed(0)}%</span>`
-    : "";
-}
-
-function renderWarnings() {
-  warnings.innerHTML = State.warnings.length
-    ? `<div class="warning">${State.warnings.join("<br>")}</div>`
-    : "";
-}
-
-/* Looker-style logic */
-function renderResult() {
-  if (!State.rows.length) {
-    resultCard.innerHTML = "No data";
+function renderInsights(rows) {
+  if (!rows || rows.length === 0) {
+    insights.innerHTML = "No insights available";
     return;
   }
 
-  const keys = Object.keys(State.rows[0]);
+  const dim = Object.keys(rows[0])[0];
+  const metric = Object.keys(rows[0])[1];
 
-  // KPI
-  if (keys.length === 1) {
-    resultCard.innerHTML = `
-      <div class="kpi">₹ ${Number(State.rows[0][keys[0]]).toLocaleString()}</div>
-      <div>Total ${keys[0]}</div>
-    `;
+  const sorted = [...rows].sort((a,b) => b[metric] - a[metric]);
+  const total = sorted.reduce((s,r)=>s+r[metric],0);
+  const top = sorted[0];
+  const top3 = sorted.slice(0,3).reduce((s,r)=>s+r[metric],0);
+
+  insights.innerHTML = `
+    <div class="insight">🔝 <b>${top[dim]}</b> contributes ${((top[metric]/total)*100).toFixed(1)}% of total spend</div>
+    <div class="insight">📊 Top 3 ${dim}s contribute ${((top3/total)*100).toFixed(1)}%</div>
+    <div class="insight">⚠️ Concentration risk if Top 3 &gt; 70%</div>
+    <div class="insight">🧮 Average ${metric}: ₹ ${(total/rows.length).toLocaleString()}</div>
+  `;
+}
+
+function renderTable(rows) {
+  if (!rows || rows.length === 0) {
+    results.innerHTML = "No data";
     return;
   }
 
-  // Table
+  const cols = Object.keys(rows[0]);
   let html = "<table><tr>";
-  keys.forEach(k => html += `<th>${k}</th>`);
+  cols.forEach(c => html += `<th>${c}</th>`);
   html += "</tr>";
 
-  State.rows.forEach(r => {
+  rows.forEach(r => {
     html += "<tr>";
-    keys.forEach(k => html += `<td>${r[k]}</td>`);
+    cols.forEach(c => html += `<td>${r[c]}</td>`);
     html += "</tr>";
   });
 
   html += "</table>";
-  resultCard.innerHTML = html;
+  results.innerHTML = html;
 }
 
-function renderChart() {
-  if (State.rows.length === 0) return;
+function renderChart(rows) {
+  if (!rows || rows.length === 0) return;
 
-  const keys = Object.keys(State.rows[0]);
+  const keys = Object.keys(rows[0]);
   if (keys.length < 2) return;
 
   chartCard.style.display = "block";
+
+  lastChartData = {
+    labels: rows.map(r => r[keys[0]]),
+    values: rows.map(r => Number(r[keys[1]])),
+    label: keys[1]
+  };
+
+  drawChart();
+}
+
+function drawChart() {
+  if (!lastChartData) return;
+
   if (chartInstance) chartInstance.destroy();
 
   chartInstance = new Chart(chartCanvas, {
-    type: "bar",
+    type: currentChartType,
     data: {
-      labels: State.rows.map(r => r[keys[0]]),
+      labels: lastChartData.labels,
       datasets: [{
-        label: keys[1],
-        data: State.rows.map(r => r[keys[1]]),
-        backgroundColor: "#1e88e5"
+        data: lastChartData.values,
+        label: lastChartData.label,
+        backgroundColor: [
+          "#1e88e5","#43a047","#fb8c00",
+          "#8e24aa","#e53935","#00acc1"
+        ]
       }]
     },
-    options: { plugins:{ legend:{ display:false } } }
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom" } }
+    }
   });
 }
 
-function renderAIPanel() {
-  if (!ENABLE_AI_PANEL) return;
+function setChartType(type) {
+  currentChartType = type;
+  drawChart();
+}
 
-  aiPanel.style.display = "block";
-  aiPanel.className = "ai-panel";
-  aiPanel.innerHTML = `
-    <b>AI Insights</b><br>
-    Generating explanation & suggestions…<br>
-    <small>(Available shortly)</small>
-  `;
+function exportChart() {
+  if (!chartInstance) return;
+  const link = document.createElement("a");
+  link.href = chartInstance.toBase64Image();
+  link.download = "spend_visualization.png";
+  link.click();
 }
 </script>
 
