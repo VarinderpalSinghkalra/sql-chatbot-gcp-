@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spend Analytics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 96%;
+      max-width: 1200px;
+      background: #fff;
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+    }
+
+    h1 { color: #1a237e; margin: 0; font-size: 22px; }
+
+    .badge {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .search-box { display: flex; gap: 10px; margin: 14px 0; }
+
+    input {
+      flex: 1;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      font-size: 14px;
+    }
+
+    button, select {
+      background: linear-gradient(135deg, #3949ab, #1e88e5);
+      border: none;
+      padding: 10px 16px;
+      color: #fff;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .card {
+      background: #f9fafc;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .confidence {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .insight {
+      background: #e3f2fd;
+      border-left: 4px solid #1e88e5;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: #0d47a1;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px; border-bottom: 1px solid #ddd; }
+    th { background: #e3f2fd; }
+
+    .chart-section {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .chart-wrapper {
+      width: 340px;
+      height: 240px;
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .export-box {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h1>Spend Analytics</h1>
+    <div class="badge">BigQuery Native</div>
+  </div>
+
+  <div class="search-box">
+    <input id="question" placeholder="Ask: Buying channel wise spend" />
+    <button onclick="ask()">Ask</button>
+  </div>
+
+  <div id="confidence"></div>
+
+  <div class="card">
+    <h3>Insights</h3>
+    <div id="insights">Run a query to see insights</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:flex-end;">
+      <select onchange="sqlCard.style.display=this.value==='show'?'block':'none'">
+        <option value="hide">Hide SQL</option>
+        <option value="show">Show SQL</option>
+      </select>
+    </div>
+    <div id="sqlCard" style="display:none;">
+      <pre id="sql">--</pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet</div>
+  </div>
+
+  <!-- Visualization -->
+  <div class="card" id="chartCard" style="display:none;">
+    <div class="export-box">
+      <select id="exportType">
+        <option value="bar">Export Bar Chart</option>
+        <option value="pie">Export Pie Chart</option>
+        <option value="donut">Export Donut Chart</option>
+      </select>
+      <button onclick="exportSelectedChart()">Export</button>
+    </div>
+
+    <h3>Visualization</h3>
+
+    <div class="chart-section">
+      <div class="chart-wrapper">
+        <canvas id="barChart"></canvas>
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="pieChart"></canvas>
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="donutChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
+let barChart, pieChart, donutChart;
+
+async function ask() {
+  const q = question.value;
+  if (!q) return;
+
+  chartCard.style.display = "none";
+  insights.innerHTML = "Analyzing...";
+  results.innerHTML = "Loading...";
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: q })
+  });
+
+  const data = await res.json();
+
+  sql.innerText = data.sql || "--";
+  confidence.innerHTML =
+    `<span class="confidence">Confidence ${(data.confidence_score * 100).toFixed(0)}%</span>`;
+
+  renderTable(data.rows);
+  renderInsights(data.rows);
+  renderCharts(data.rows);
+}
+
+/* INSIGHTS */
+function renderInsights(rows) {
+  if (!rows || rows.length === 0) {
+    insights.innerHTML = "No insights available";
+    return;
+  }
+
+  const dim = Object.keys(rows[0])[0];
+  const metric = Object.keys(rows[0])[1];
+
+  const clean = rows.map(r => ({
+    dim: r[dim],
+    value: Number(r[metric]) || 0
+  }));
+
+  const sorted = [...clean].sort((a,b)=>b.value-a.value);
+  const total = sorted.reduce((s,r)=>s+r.value,0);
+  const pct = (p,t)=>t>0?((p/t)*100).toFixed(1):"0.0";
+
+  insights.innerHTML = `
+    <div class="insight">🔝 ${sorted[0].dim}: ${pct(sorted[0].value,total)}%</div>
+    <div class="insight">📊 Top 3 ${dim}s: ${pct(sorted.slice(0,3).reduce((s,r)=>s+r.value,0),total)}%</div>
+    <div class="insight">⚠️ Concentration risk if Top 3 &gt; 70%</div>
+  `;
+}
+
+/* TABLE */
+function renderTable(rows) {
+  if (!rows || rows.length === 0) {
+    results.innerHTML = "No data";
+    return;
+  }
+
+  const cols = Object.keys(rows[0]);
+  let html = "<table><tr>";
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += "</tr>";
+
+  rows.forEach(r => {
+    html += "<tr>";
+    cols.forEach(c => html += `<td>${r[c]}</td>`);
+    html += "</tr>";
+  });
+
+  html += "</table>";
+  results.innerHTML = html;
+}
+
+/* CHARTS */
+function renderCharts(rows) {
+  if (!rows || rows.length === 0) return;
+
+  chartCard.style.display = "block";
+
+  const keys = Object.keys(rows[0]);
+  const labels = rows.map(r => r[keys[0]]);
+  const values = rows.map(r => Number(r[keys[1]]) || 0);
+
+  const indexed = values.map((v,i)=>({value:v,index:i})).sort((a,b)=>b.value-a.value);
+  const top3Idx = indexed.slice(0,3).map(x=>x.index);
+
+  const barColors = values.map((_,i)=>{
+    if (i === indexed[0].index) return "#d32f2f";
+    if (top3Idx.includes(i)) return "#fb8c00";
+    return "#90caf9";
+  });
+
+  const pieColors = ["#1e88e5","#43a047","#fb8c00","#8e24aa","#e53935","#00acc1"];
+
+  barChart && barChart.destroy();
+  pieChart && pieChart.destroy();
+  donutChart && donutChart.destroy();
+
+  barChart = new Chart(document.getElementById("barChart"), {
+    type: "bar",
+    data: { labels, datasets:[{ data: values, backgroundColor: barColors }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+  });
+
+  pieChart = new Chart(document.getElementById("pieChart"), {
+    type: "pie",
+    data: { labels, datasets:[{ data: values, backgroundColor: pieColors }] },
+    options:{ responsive:true, maintainAspectRatio:false }
+  });
+
+  donutChart = new Chart(document.getElementById("donutChart"), {
+    type: "doughnut",
+    data: { labels, datasets:[{ data: values, backgroundColor: pieColors }] },
+    options:{ responsive:true, maintainAspectRatio:false }
+  });
+}
+
+/* EXPORT SELECTED */
+function exportSelectedChart() {
+  const type = document.getElementById("exportType").value;
+  let chart;
+
+  if (type === "bar") chart = barChart;
+  if (type === "pie") chart = pieChart;
+  if (type === "donut") chart = donutChart;
+
+  if (!chart) return;
+
+  const link = document.createElement("a");
+  link.href = chart.toBase64Image();
+  link.download = `spend_${type}_chart.png`;
+  link.click();
+}
+</script>
+
+</body>
+</html>
