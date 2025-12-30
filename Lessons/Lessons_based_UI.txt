@@ -1,0 +1,184 @@
+LESSON FILE
+Project: Prompt-Driven Spend Analytics Engine (GCP)
+Topic: Is the system hardcoded or dynamic?
+
+====================================================
+1. KEY QUESTION
+----------------------------------------------------
+Is the analytics system returning hardcoded results?
+
+Answer:
+NO. The system is deterministic and rule-driven, not hardcoded.
+
+====================================================
+2. WHAT “HARDCODED” WOULD MEAN (AND WHAT WE AVOIDED)
+----------------------------------------------------
+Hardcoded results would mean:
+- Fixed SQL queries written manually
+- Fixed GROUP BY columns
+- Fixed metrics (always SUM(spend))
+- Fixed date ranges
+- Prompt mapped to pre-written answers
+- AI generating SQL directly
+
+NONE of the above is used in this system.
+
+====================================================
+3. HOW SQL IS ACTUALLY GENERATED
+----------------------------------------------------
+SQL is generated dynamically based on:
+
+- User prompt
+- Detected dimension (business unit, vendor, channel, etc.)
+- Detected metric (spend, count, volume, savings)
+- Detected time intent (e.g., last 12 months)
+- Live BigQuery table schema
+
+The prompt only influences intent.
+The data determines the result.
+
+====================================================
+4. DIMENSION HANDLING (WHY THIS IS NOT HARDCODING)
+----------------------------------------------------
+Dimensions are selected using a controlled registry:
+
+- business unit → business_unit
+- vendor / supplier → supplier
+- buying channel → buying_channel
+
+This is intentional and required for:
+- Security
+- Governance
+- Explainability
+- Prevention of prompt injection
+
+This is the same pattern used by Looker semantic layers.
+
+Hardcoding answers ❌
+Whitelisting dimensions ✅
+
+====================================================
+5. METRIC SELECTION LOGIC
+----------------------------------------------------
+Metrics are resolved logically, not fixed.
+
+Examples:
+- "count" → COUNT(*)
+- "volume" → SUM(quantity)
+- Default → SUM(amt_local)
+
+Metric selection depends on:
+- Prompt intent
+- Column availability in schema
+
+If a column does not exist, it is never used.
+
+====================================================
+6. SCHEMA-AWARE DESIGN
+----------------------------------------------------
+Table schema is loaded dynamically from BigQuery
+at container startup and cached in memory.
+
+Benefits:
+- No assumptions about columns
+- Automatic adaptation to schema changes
+- Safe casting based on actual data types
+- No silent failures
+
+This removes hidden coupling between UI and data.
+
+====================================================
+7. DATE FILTERING (NOT HARDCODED)
+----------------------------------------------------
+Date logic is intent-based, not static.
+
+Example:
+"last 12 months" does NOT mean a fixed date.
+
+Instead:
+- Uses the latest available date in the table
+- Subtracts 12 months dynamically
+- Fails open if date parsing fails
+
+This ensures correctness on both historical and live data.
+
+====================================================
+8. SQL VALIDATION (SECURITY LAYER)
+----------------------------------------------------
+Before execution:
+- SQL AST is parsed using sqlglot
+- Only the approved table is allowed
+- Only known schema columns are allowed
+
+This prevents:
+- Table injection
+- Column injection
+- Prompt abuse
+
+Security rules are hardcoded.
+Results are NOT.
+
+====================================================
+9. QUERY CACHING ≠ HARDCODING
+----------------------------------------------------
+Query results are cached in memory using:
+
+SQL string → result rows
+
+If SQL changes, cache is bypassed automatically.
+
+This is a performance optimization, not static output.
+
+====================================================
+10. ROLE OF GEMINI (IMPORTANT)
+----------------------------------------------------
+Gemini:
+- Runs asynchronously
+- Never generates SQL
+- Never modifies results
+- Never blocks the request path
+
+Gemini is used ONLY for:
+- Explanation
+- Suggested follow-up questions
+
+Analytics remain deterministic.
+
+====================================================
+11. UI INSIGHTS DESIGN
+----------------------------------------------------
+Insights:
+- Are computed on the frontend
+- Depend on returned schema (dimension + metric)
+- Do not depend on prompt text directly
+- Are safe from NaN and invalid math
+
+This ensures:
+- No hallucinated insights
+- Fully explainable numbers
+- Consistent behavior across prompts
+
+====================================================
+12. FINAL CONCLUSION
+----------------------------------------------------
+This system does NOT hardcode results.
+
+It uses:
+- Hardcoded guardrails
+- Dynamic SQL generation
+- Schema-aware validation
+- Deterministic aggregation
+- Prompt-driven intent resolution
+
+This is the correct enterprise design choice.
+
+====================================================
+13. INTERVIEW-READY ONE-LINER
+----------------------------------------------------
+“We hardcode guardrails, not answers.
+Queries are generated deterministically from the prompt,
+validated against the live schema,
+and executed directly on BigQuery.”
+
+====================================================
+END OF LESSON
