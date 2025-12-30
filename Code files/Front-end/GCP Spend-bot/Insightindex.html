@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spend Analytics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 95%;
+      max-width: 1150px;
+      background: #fff;
+      border-radius: 18px;
+      padding: 30px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+    }
+
+    h1 { color: #1a237e; margin: 0; }
+
+    .badge {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .search-box { display: flex; gap: 10px; margin: 20px 0; }
+
+    input {
+      flex: 1;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      font-size: 15px;
+    }
+
+    button {
+      background: linear-gradient(135deg, #3949ab, #1e88e5);
+      border: none;
+      padding: 10px 18px;
+      color: #fff;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .card {
+      background: #f9fafc;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 15px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .confidence {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .insight {
+      background: #e3f2fd;
+      border-left: 5px solid #1e88e5;
+      padding: 12px 15px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #0d47a1;
+    }
+
+    .insight-note {
+      font-size: 12px;
+      color: #455a64;
+      margin-bottom: 10px;
+    }
+
+    pre {
+      background: #111827;
+      color: #00e676;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; border-bottom: 1px solid #ddd; }
+    th { background: #e3f2fd; }
+
+    .chart-controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .chart-wrapper {
+      max-width: 420px;
+      margin: auto;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h1>Spend Analytics</h1>
+    <div class="badge">BigQuery Native</div>
+  </div>
+
+  <div class="search-box">
+    <input id="question" placeholder="Ask: Buying channel wise spend" />
+    <button onclick="ask()">Ask</button>
+  </div>
+
+  <div id="confidence"></div>
+
+  <div class="card">
+    <h3>Insights</h3>
+
+    <!-- 👇 Explicit design statement -->
+    <div class="insight-note">
+      Insights are computed deterministically from query results.  
+      They adapt automatically based on the prompt-driven schema and avoid inferred or generated interpretations.
+    </div>
+
+    <div id="insights">Run a query to see insights</div>
+  </div>
+
+  <div class="card">
+    <h3>Generated SQL</h3>
+    <pre id="sql">--</pre>
+  </div>
+
+  <div class="card">
+    <h3>Results</h3>
+    <div id="results">No results yet</div>
+  </div>
+
+  <div class="card" id="chartCard" style="display:none;">
+    <h3>Visualization</h3>
+
+    <div class="chart-controls">
+      <button onclick="setChartType('bar')">Bar</button>
+      <button onclick="setChartType('pie')">Pie</button>
+      <button onclick="setChartType('doughnut')">Donut</button>
+      <button onclick="exportChart()">Export PNG</button>
+    </div>
+
+    <div class="chart-wrapper">
+      <canvas id="chartCanvas"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
+
+let chartInstance = null;
+let currentChartType = "bar";
+let lastChartData = null;
+
+async function ask() {
+  const q = question.value;
+  if (!q) return;
+
+  results.innerHTML = "Loading...";
+  insights.innerHTML = "Analyzing...";
+  chartCard.style.display = "none";
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: q })
+  });
+
+  const data = await res.json();
+
+  sql.innerText = data.sql || "--";
+  confidence.innerHTML =
+    `<span class="confidence">Confidence ${(data.confidence_score * 100).toFixed(0)}%</span>`;
+
+  renderTable(data.rows);
+  renderInsights(data.rows);
+  renderChart(data.rows);
+}
+
+/* Prompt-aware, schema-driven, deterministic insights */
+function renderInsights(rows) {
+  if (!rows || rows.length === 0) {
+    insights.innerHTML = "No insights available for this query";
+    return;
+  }
+
+  const dim = Object.keys(rows[0])[0];
+  const metric = Object.keys(rows[0])[1];
+
+  const clean = rows
+    .map(r => ({ dim: r[dim], value: Number(r[metric]) || 0 }))
+    .filter(r => r.dim !== null && r.dim !== undefined);
+
+  if (clean.length === 0) {
+    insights.innerHTML = "Insights not applicable for the returned data";
+    return;
+  }
+
+  const sorted = [...clean].sort((a, b) => b.value - a.value);
+  const total = sorted.reduce((s, r) => s + r.value, 0);
+
+  const pct = (p, t) => t > 0 ? ((p / t) * 100).toFixed(1) : "0.0";
+
+  const top = sorted[0];
+  const top3 = sorted.slice(0, 3).reduce((s, r) => s + r.value, 0);
+  const avg = total > 0 ? (total / clean.length).toFixed(0) : "0";
+
+  insights.innerHTML = `
+    <div class="insight">🔝 <b>${top.dim}</b> contributes ${pct(top.value, total)}% of total spend</div>
+    <div class="insight">📊 Top 3 ${dim}s contribute ${pct(top3, total)}%</div>
+    <div class="insight">⚠️ Concentration risk if Top 3 &gt; 70%</div>
+    <div class="insight">🧮 Average ${metric}: ₹ ${Number(avg).toLocaleString("en-IN")}</div>
+  `;
+}
+
+function renderTable(rows) {
+  if (!rows || rows.length === 0) {
+    results.innerHTML = "No data";
+    return;
+  }
+
+  const cols = Object.keys(rows[0]);
+  let html = "<table><tr>";
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += "</tr>";
+
+  rows.forEach(r => {
+    html += "<tr>";
+    cols.forEach(c => html += `<td>${r[c]}</td>`);
+    html += "</tr>";
+  });
+
+  html += "</table>";
+  results.innerHTML = html;
+}
+
+function renderChart(rows) {
+  if (!rows || rows.length === 0) return;
+
+  const keys = Object.keys(rows[0]);
+  if (keys.length < 2) return;
+
+  chartCard.style.display = "block";
+
+  lastChartData = {
+    labels: rows.map(r => r[keys[0]]),
+    values: rows.map(r => Number(r[keys[1]]) || 0),
+    label: keys[1]
+  };
+
+  drawChart();
+}
+
+function drawChart() {
+  if (!lastChartData) return;
+  if (chartInstance) chartInstance.destroy();
+
+  chartInstance = new Chart(chartCanvas, {
+    type: currentChartType,
+    data: {
+      labels: lastChartData.labels,
+      datasets: [{
+        data: lastChartData.values,
+        label: lastChartData.label,
+        backgroundColor: [
+          "#1e88e5","#43a047","#fb8c00",
+          "#8e24aa","#e53935","#00acc1"
+        ]
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom" } }
+    }
+  });
+}
+
+function setChartType(type) {
+  currentChartType = type;
+  drawChart();
+}
+
+function exportChart() {
+  if (!chartInstance) return;
+  const link = document.createElement("a");
+  link.href = chartInstance.toBase64Image();
+  link.download = "spend_visualization.png";
+  link.click();
+}
+</script>
+
+</body>
+</html>
