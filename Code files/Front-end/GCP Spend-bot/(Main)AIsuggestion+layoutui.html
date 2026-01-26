@@ -30,6 +30,7 @@
     }
 
     h1 { color: #1a237e; margin: 0; font-size: 22px; }
+    h3 { margin-top: 0; }
 
     .badge {
       background: #e3f2fd;
@@ -70,13 +71,13 @@
     }
 
     .confidence {
-      display: inline-block;
       background: #e8f5e9;
       color: #2e7d32;
       padding: 5px 10px;
       border-radius: 20px;
       font-size: 12px;
       font-weight: 600;
+      display: inline-block;
       margin-bottom: 8px;
     }
 
@@ -87,7 +88,6 @@
       border-radius: 6px;
       margin-bottom: 6px;
       font-size: 13px;
-      color: #0d47a1;
     }
 
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -106,16 +106,25 @@
       height: 240px;
     }
 
-    canvas {
-      width: 100% !important;
-      height: 100% !important;
-    }
+    canvas { width: 100% !important; height: 100% !important; }
 
     .export-box {
       display: flex;
       justify-content: flex-end;
       gap: 10px;
       margin-bottom: 8px;
+    }
+
+    .prompt-box {
+      display: none;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .prompt-box button {
+      background: #e3f2fd;
+      color: #0d47a1;
     }
   </style>
 </head>
@@ -132,6 +141,20 @@
   <div class="search-box">
     <input id="question" placeholder="Ask: Buying channel wise spend" />
     <button onclick="ask()">Ask</button>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>✨ AI Suggested Prompts</h3>
+      <button onclick="togglePrompts()">Toggle</button>
+    </div>
+    <div id="promptBox" class="prompt-box">
+      <button onclick="runPrompt('Buying channel wise spend')">Buying channel wise spend</button>
+      <button onclick="runPrompt('Top 5 vendors by total spend')">Top 5 vendors by spend</button>
+      <button onclick="runPrompt('Monthly spend trend for last 12 months')">Monthly spend trend</button>
+      <button onclick="runPrompt('Category wise procurement spend')">Category wise spend</button>
+      <button onclick="runPrompt('Country wise supplier spend')">Country wise supplier spend</button>
+    </div>
   </div>
 
   <div id="confidence"></div>
@@ -158,7 +181,6 @@
     <div id="results">No results yet</div>
   </div>
 
-  <!-- Visualization -->
   <div class="card" id="chartCard" style="display:none;">
     <div class="export-box">
       <select id="exportType">
@@ -172,15 +194,9 @@
     <h3>Visualization</h3>
 
     <div class="chart-section">
-      <div class="chart-wrapper">
-        <canvas id="barChart"></canvas>
-      </div>
-      <div class="chart-wrapper">
-        <canvas id="pieChart"></canvas>
-      </div>
-      <div class="chart-wrapper">
-        <canvas id="donutChart"></canvas>
-      </div>
+      <div class="chart-wrapper"><canvas id="barChart"></canvas></div>
+      <div class="chart-wrapper"><canvas id="pieChart"></canvas></div>
+      <div class="chart-wrapper"><canvas id="donutChart"></canvas></div>
     </div>
   </div>
 
@@ -190,9 +206,17 @@
 const API_URL = "https://sqlbotmainup-277069041958.us-central1.run.app";
 let barChart, pieChart, donutChart;
 
+function togglePrompts() {
+  promptBox.style.display = promptBox.style.display === "flex" ? "none" : "flex";
+}
+
+function runPrompt(text) {
+  question.value = text;
+  ask();
+}
+
 async function ask() {
-  const q = question.value;
-  if (!q) return;
+  if (!question.value) return;
 
   chartCard.style.display = "none";
   insights.innerHTML = "Analyzing...";
@@ -201,23 +225,21 @@ async function ask() {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: q })
+    body: JSON.stringify({ question: question.value })
   });
 
   const data = await res.json();
 
   sql.innerText = data.sql || "--";
-  confidence.innerHTML =
-    `<span class="confidence">Confidence ${(data.confidence_score * 100).toFixed(0)}%</span>`;
+  confidence.innerHTML = `<span class="confidence">Confidence ${(data.confidence_score * 100).toFixed(0)}%</span>`;
 
   renderTable(data.rows);
   renderInsights(data.rows);
   renderCharts(data.rows);
 }
 
-/* INSIGHTS */
 function renderInsights(rows) {
-  if (!rows || rows.length === 0) {
+  if (!rows || !rows.length) {
     insights.innerHTML = "No insights available";
     return;
   }
@@ -225,25 +247,21 @@ function renderInsights(rows) {
   const dim = Object.keys(rows[0])[0];
   const metric = Object.keys(rows[0])[1];
 
-  const clean = rows.map(r => ({
-    dim: r[dim],
-    value: Number(r[metric]) || 0
-  }));
-
+  const clean = rows.map(r => ({ dim: r[dim], value: Number(r[metric]) || 0 }));
   const sorted = [...clean].sort((a,b)=>b.value-a.value);
   const total = sorted.reduce((s,r)=>s+r.value,0);
-  const pct = (p,t)=>t>0?((p/t)*100).toFixed(1):"0.0";
+
+  const pct = v => ((v / total) * 100).toFixed(1);
 
   insights.innerHTML = `
-    <div class="insight">🔝 ${sorted[0].dim}: ${pct(sorted[0].value,total)}%</div>
-    <div class="insight">📊 Top 3 ${dim}s: ${pct(sorted.slice(0,3).reduce((s,r)=>s+r.value,0),total)}%</div>
+    <div class="insight">🔝 ${sorted[0].dim}: ${pct(sorted[0].value)}%</div>
+    <div class="insight">📊 Top 3 ${dim}s: ${pct(sorted.slice(0,3).reduce((s,r)=>s+r.value,0))}%</div>
     <div class="insight">⚠️ Concentration risk if Top 3 &gt; 70%</div>
   `;
 }
 
-/* TABLE */
 function renderTable(rows) {
-  if (!rows || rows.length === 0) {
+  if (!rows || !rows.length) {
     results.innerHTML = "No data";
     return;
   }
@@ -259,13 +277,11 @@ function renderTable(rows) {
     html += "</tr>";
   });
 
-  html += "</table>";
-  results.innerHTML = html;
+  results.innerHTML = html + "</table>";
 }
 
-/* CHARTS */
 function renderCharts(rows) {
-  if (!rows || rows.length === 0) return;
+  if (!rows || !rows.length) return;
 
   chartCard.style.display = "block";
 
@@ -273,49 +289,32 @@ function renderCharts(rows) {
   const labels = rows.map(r => r[keys[0]]);
   const values = rows.map(r => Number(r[keys[1]]) || 0);
 
-  const indexed = values.map((v,i)=>({value:v,index:i})).sort((a,b)=>b.value-a.value);
-  const top3Idx = indexed.slice(0,3).map(x=>x.index);
-
-  const barColors = values.map((_,i)=>{
-    if (i === indexed[0].index) return "#d32f2f";
-    if (top3Idx.includes(i)) return "#fb8c00";
-    return "#90caf9";
-  });
-
-  const pieColors = ["#1e88e5","#43a047","#fb8c00","#8e24aa","#e53935","#00acc1"];
-
   barChart && barChart.destroy();
   pieChart && pieChart.destroy();
   donutChart && donutChart.destroy();
 
   barChart = new Chart(document.getElementById("barChart"), {
     type: "bar",
-    data: { labels, datasets:[{ data: values, backgroundColor: barColors }] },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+    data: { labels, datasets: [{ data: values, backgroundColor: "#42a5f5" }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}} }
   });
 
   pieChart = new Chart(document.getElementById("pieChart"), {
     type: "pie",
-    data: { labels, datasets:[{ data: values, backgroundColor: pieColors }] },
-    options:{ responsive:true, maintainAspectRatio:false }
+    data: { labels, datasets: [{ data: values }] },
+    options: { responsive: true, maintainAspectRatio: false }
   });
 
   donutChart = new Chart(document.getElementById("donutChart"), {
     type: "doughnut",
-    data: { labels, datasets:[{ data: values, backgroundColor: pieColors }] },
-    options:{ responsive:true, maintainAspectRatio:false }
+    data: { labels, datasets: [{ data: values }] },
+    options: { responsive: true, maintainAspectRatio: false }
   });
 }
 
-/* EXPORT SELECTED */
 function exportSelectedChart() {
-  const type = document.getElementById("exportType").value;
-  let chart;
-
-  if (type === "bar") chart = barChart;
-  if (type === "pie") chart = pieChart;
-  if (type === "donut") chart = donutChart;
-
+  const type = exportType.value;
+  const chart = type === "bar" ? barChart : type === "pie" ? pieChart : donutChart;
   if (!chart) return;
 
   const link = document.createElement("a");
